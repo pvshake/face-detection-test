@@ -10,6 +10,7 @@ export default function Home() {
   const canvasRef = useRef(null);
   const [loadedModels, setLoadedModels] = useState(false);
   const [buttonDisabled, setButtonDisabled] = useState(true);
+  const intervalRef = useRef(null);
 
   useEffect(() => {
     const MODEL_URL = "/models";
@@ -19,58 +20,60 @@ export default function Home() {
       faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
       faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
-    ]);
-
-    setLoadedModels(true);
+    ]).then(() => {
+      setLoadedModels(true);
+    });
   }, [isWebCamOpen]);
 
   const takePhoto = () => {
     const video = videoRef.current;
+    const canvas = canvasRef.current;
 
-    // Reduz o tamanho da foto para 70% do tamanho do vídeo
-    const canvasWidth = video.videoWidth * 0.7;
-    const canvasHeight = video.videoHeight * 0.7;
+    if (video && canvas) {
+      // Reduz o tamanho da foto para 70% do tamanho do vídeo
+      const canvasWidth = video.videoWidth * 0.7;
+      const canvasHeight = video.videoHeight * 0.7;
 
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
 
-    // Calcula a posição de corte para centralizar a foto
-    const cropX = (video.videoWidth - canvasWidth) / 2;
-    const cropY = (video.videoHeight - canvasHeight) / 2;
+      // Calcula a posição de corte para centralizar a foto
+      const cropX = (video.videoWidth - canvasWidth) / 2;
+      const cropY = (video.videoHeight - canvasHeight) / 2;
 
-    context.drawImage(
-      video,
-      cropX,
-      cropY,
-      canvasWidth,
-      canvasHeight,
-      0,
-      0,
-      canvasWidth,
-      canvasHeight
-    );
+      const context = canvas.getContext("2d");
+      context.drawImage(
+        video,
+        cropX,
+        cropY,
+        canvasWidth,
+        canvasHeight,
+        0,
+        0,
+        canvasWidth,
+        canvasHeight
+      );
 
-    const data = canvas.toDataURL("image/png");
-    const link = document.createElement("a");
-    link.download = "image.png";
-    link.href = data;
-    link.click();
+      const data = canvas.toDataURL("image/jpg");
+      const link = document.createElement("a");
+      link.download = "image.jpg";
+      link.href = data;
+      link.click();
+    }
   };
 
   useEffect(() => {
     if (isWebCamOpen) {
       videoRef.current.srcObject = streaming;
 
-      videoRef.current.addEventListener("play", () => {
+      const yourInterval = setInterval(async () => {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const displaySize = { width: 720, height: 560 };
 
-        faceapi.matchDimensions(canvas, displaySize);
+        if (video && canvas) {
+          faceapi.matchDimensions(canvas, displaySize);
 
-        setInterval(async () => {
           const detections = await faceapi.detectAllFaces(
             video,
             new faceapi.TinyFaceDetectorOptions()
@@ -86,16 +89,51 @@ export default function Home() {
           let scoreDisabled = true;
 
           for (const detection of resizedDetections) {
-            if (detection.score > 0.8) {
-              faceapi.draw.drawDetections(canvas, [detection]);
+            if (detection.score > 0.7) {
+              // faceapi.draw.drawDetections(canvas, [detection]);
               scoreDisabled = false;
             }
           }
           setButtonDisabled(scoreDisabled);
-        }, 1000);
-      });
+        }
+      }, 1000);
+
+      intervalRef.current = yourInterval;
     }
-  }, [isWebCamOpen, streaming, buttonDisabled]);
+  }, [isWebCamOpen, streaming]);
+
+  useEffect(() => {
+    return () => {
+      // Limpa o intervalo quando o componente é desmontado
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
+  const toggleWebcam = () => {
+    setLoading(true);
+
+    if (streaming && isWebCamOpen) {
+      streaming.getTracks().forEach((track) => {
+        track.stop();
+      });
+      setIsWebCamOpen(false);
+      setStreaming(null);
+      setLoading(false);
+    } else {
+      navigator.mediaDevices
+        .getUserMedia({ video: true })
+        .then((stream) => {
+          setIsWebCamOpen(true);
+          setStreaming(stream);
+        })
+        .catch((error) => {
+          console.error("Erro ao acessar a câmera:", error);
+          setLoading(false);
+        });
+    }
+  };
 
   return (
     <main className={styles.page}>
@@ -119,7 +157,6 @@ export default function Home() {
                   height: "100%",
                   borderRadius: "12px",
                   objectFit: "cover",
-                  // transform: "scaleX(-1)",
                 }}
                 autoPlay
                 muted
@@ -133,7 +170,6 @@ export default function Home() {
                   width: "100%",
                   height: "100%",
                   borderRadius: "12px",
-                  // transform: "scaleX(-1)"
                 }}
               />
             </>
@@ -233,44 +269,68 @@ export default function Home() {
                     margin: 8,
                     cursor: buttonDisabled ? "not-allowed" : "pointer",
                     border: "none",
+                    opacity: buttonDisabled ? 0.4 : 1,
                   }}
                   onClick={takePhoto}
                   disabled={loading || buttonDisabled}
                 >
-                  {loading ? "📸 Tirando..." : "📸 Tirar Foto"}
+                  {loading
+                    ? "📸 Tirando..."
+                    : buttonDisabled
+                    ? "Rosto não detectado"
+                    : "📸 Tirar Foto"}
                 </button>
               </>
             ) : (
-              <button
-                style={{
-                  backgroundColor: "#e2e8f0",
-                  color: "#1a202c",
-                  fontFamily: "sans-serif",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  borderRadius: 12,
-                  height: 40,
-                  width: 200,
-                  margin: 8,
-                  cursor: "pointer",
-                  border: "none",
-                }}
-                onClick={() => {
-                  setLoading(true);
-                  navigator.mediaDevices
-                    .getUserMedia({ video: true })
-                    .then((stream) => {
-                      setIsWebCamOpen(true);
-                      setStreaming(stream);
-                    })
-                    .then(() => {
-                      setLoading(false);
-                    });
-                }}
-                disabled={loading}
-              >
-                {loading ? "Ligando..." : "Ligar Câmera"}
-              </button>
+              <>
+                <button
+                  style={{
+                    backgroundColor: "#4bb543",
+                    color: "#e2e8f0",
+                    fontFamily: "sans-serif",
+                    fontSize: 16,
+                    fontWeight: 600,
+                    borderRadius: 12,
+                    height: 40,
+                    width: 200,
+                    margin: 8,
+                    cursor: "pointer",
+                    border: "none",
+                  }}
+                  onClick={() => {
+                    setLoading(true);
+                    navigator.mediaDevices
+                      .getUserMedia({ video: true })
+                      .then((stream) => {
+                        setIsWebCamOpen(true);
+                        setStreaming(stream);
+                      })
+                      .then(() => {
+                        setLoading(false);
+                      });
+                  }}
+                  disabled={loading}
+                >
+                  {loading ? "Ligando..." : "Ligar Câmera"}
+                </button>
+                <button
+                  style={{
+                    backgroundColor: "#e2e8f0",
+                    color: "#1a202c",
+                    fontFamily: "sans-serif",
+                    fontSize: 16,
+                    fontWeight: 600,
+                    borderRadius: 12,
+                    height: 40,
+                    width: 200,
+                    margin: 8,
+                    border: "none",
+                  }}
+                  onClick={() => console.log("oiiiiiii")}
+                >
+                  ⬆️ Fazer upload
+                </button>
+              </>
             )}
           </div>
         </div>
